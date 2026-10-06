@@ -1,6 +1,6 @@
 # Resultados da validação
 
-Validação ponta a ponta feita em 06/10/2026, numa conta de testes em `us-east-1`, antes da palestra de 16/10/2026.
+Validação ponta a ponta feita numa conta de testes em `us-east-1`, antes da palestra.
 
 Ambiente: macOS (Apple Silicon), OrbStack com Docker 29.4.0 (containerd image store), buildx 0.33.0, AWS CLI 2.34.53, Trivy 0.71.1, cfn-lint e checkov locais.
 
@@ -33,7 +33,7 @@ Ambiente: macOS (Apple Silicon), OrbStack com Docker 29.4.0 (containerd image st
 
 | Premissa | Resultado | Fonte |
 |---|---|---|
-| Go 1.25 é a versão certa | **Errada.** Estável atual é 1.27.1 (1.27.0 saiu em 19/08/2026). Go só dá suporte às duas últimas majors, então 1.25 já não recebe correções de segurança. Corrigido para 1.27 | https://go.dev/dl/?mode=json, https://go.dev/doc/devel/release |
+| Go 1.25 é a versão certa | **Errada.** A estável na época da validação era a 1.27.1. Go só dá suporte às duas últimas majors, então 1.25 já não recebe correções de segurança. Corrigido para 1.27 | https://go.dev/dl/?mode=json, https://go.dev/doc/devel/release |
 | Tags `golang:1.27-alpine`, `golang:1.27` e `gcr.io/distroless/static:nonroot` existem | Existem, todas como index OCI multi-arch com `arm64` | `docker buildx imagetools inspect` nos registries |
 | Trust policy da task role com `aws:SourceAccount` + `aws:SourceArn` | Suportada e recomendada. A doc avisa que `aws:SourceArn` por cluster não é suportado, por isso o curinga `arn:aws:ecs:<região>:<conta>:*` (que é o que o template usa) | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html |
 | Bucket de layers `prod-${region}-starport-layer-bucket` | Correto, com `/*` e `s3:GetObject` | https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html |
@@ -64,7 +64,7 @@ O `Dockerfile.naive` não foi fixado por digest de propósito: ele é o exemplo 
 - **Self-healing.** Depois do `stop-task`, o scheduler do ECS levou ~26 s para reagir (deregister + novo task). Nesse intervalo o task parado continua respondendo, e por isso o `make watch` não mostra nenhum erro. O que o público vê: o `task_id` antigo some ~28 s depois do comando, só o task sobrevivente responde por ~20 s, e um `task_id` novo aparece ~50 s depois do comando. Vale narrar isso, ou mostrar o `aws ecs describe-services` / console em paralelo.
 - **`make logs`.** O `aws logs tail --follow` mostra só os últimos 10 minutos e os health checks não são logados. Sem tráfego recente a tela fica vazia: deixe o `make watch` rodando antes.
 
-#Leitura do Cost Explorer no mesmo dia, ainda parcial (`Estimated: true`), filtrando `RECORD_TYPE=Usage` para ver o custo bruto antes dos créditos:
+#Leitura do Cost Explorer no dia do teste, ainda parcial (`Estimated: true`), filtrando `RECORD_TYPE=Usage` para ver o custo bruto antes dos créditos:
 
 | Serviço | US$ | O que é |
 |---|---|---|
@@ -75,13 +75,13 @@ O `Dockerfile.naive` não foi fixado por digest de propósito: ele é o exemplo 
 | ECR + CloudWatch | < 0,0001 | Armazenamento das imagens e logs |
 | **Total da demo** | **~0,08** | Na conta de teste os créditos zeraram o valor líquido |
 
-Ficaram de fora da conta os itens que não são da demo (KMS, Glue) e o próprio Cost Explorer (US$ 0,01 por chamada à API). O slide confirma o que o plano previa: o NAT é o maior item, e hora parcial é cobrada como hora cheia.
+Ficaram de fora da conta os itens que não são da demo (KMS, Glue) e o próprio Cost Explorer (US$ 0,01 por chamada à API). Confirma o que a arquitetura previa: o NAT é o maior item, e hora parcial é cobrada como hora cheia.
 
 Para reler com os dados fechados:
 
 ```bash
 aws ce get-cost-and-usage --region us-east-1 \
-  --time-period Start=2026-10-06,End=2026-10-07 --granularity DAILY \
+  --time-period Start=<AAAA-MM-DD>,End=<dia seguinte> --granularity DAILY \
   --metrics UnblendedCost --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
   --group-by Type=DIMENSION,Key=SERVICE
 ```
