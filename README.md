@@ -1,100 +1,210 @@
 # ufpa-api
 
-Demo da palestra **"Containers na AWS desmistificados: da imagem ao deploy seguro"**, apresentada no lançamento do Student Builder Group UFPA.
+**Containers na AWS desmistificados: da imagem ao deploy seguro.** Demo da palestra apresentada no lançamento do Student Builder Group UFPA.
 
-É uma API em Go que responde com a identidade do task ECS que atendeu a requisição. Com `curl` em loop dá para ver o load balancing entre AZs, o rolling deploy e o self-healing acontecendo.
+Uma API mínima em Go, empacotada numa imagem de poucos MB, rodando no ECS Fargate (ARM64) atrás de um load balancer. Cada resposta diz **qual container atendeu** e **em qual zona de disponibilidade**, e com isso dá para *ver* a nuvem trabalhando:
+
+- o load balancer alternando entre containers em AZs diferentes;
+- um deploy trocando `v1` por `v2` sem nenhuma requisição falhar;
+- a AWS subindo sozinha um container novo quando você mata um.
 
 ```
 GET /v1/info  → {"app":"ufpa-api","version":"v1","task_id":"a1b2c3","az":"us-east-1a"}
 GET /healthz  → {"status":"ok"}
 ```
 
+## Sumário
+
+- [O que você aprende aqui](#o-que-você-aprende-aqui)
+- [Arquitetura](#arquitetura)
+- [Imagem ingênua vs. imagem bem feita](#imagem-ingênua-vs-imagem-bem-feita)
+- [Rodando](#rodando)
+- [Roteiro da demo](#roteiro-da-demo)
+- [Segurança: o que cada decisão protege](#segurança-o-que-cada-decisão-protege)
+- [Custo e limpeza](#custo-e-limpeza)
+- [Indo para produção](#indo-para-produção)
+- [Estrutura do repositório](#estrutura-do-repositório)
+
+## O que você aprende aqui
+
+1. **Construir uma boa imagem:** multi-stage, distroless, usuário não-root, digest fixo e scan de vulnerabilidades.
+2. **Como o ECS roda seu container:** task definition, service, load balancer, health check, rolling deploy e self-healing.
+3. **Task role vs. execution role**, a dúvida clássica de prova e de incidente:
+   - **Execution role:** usada pela **AWS** para preparar o container (baixar a imagem do ECR, mandar logs para o CloudWatch).
+   - **Task role:** usada pelo **seu código** quando ele chama APIs da AWS. Aqui ela fica vazia, porque a app não chama nenhuma.
+
 ## Arquitetura
 
-```
-Internet → ALB (subnets públicas, 2 AZs)
-              ↓ :8080 (SG: só do ALB)
-        ECS Fargate ARM64, 2 tasks (subnets privadas, sem IP público)
-              ↓ egress :443
-        NAT Gateway (1 AZ) → ECR API, CloudWatch Logs
-        S3 Gateway Endpoint → layers do ECR (gratuito, fora do NAT)
+```mermaid
+flowchart LR
+    user(["Internet"]) -->|"HTTP :80"| alb["Application Load Balancer<br/>subnets públicas, 2 AZs"]
+    alb -->|":8080, só a partir do ALB"| tasks["ECS Fargate ARM64<br/>2 tasks em subnets privadas<br/>sem IP público"]
+    tasks -->|":443"| nat["NAT Gateway<br/>(1 AZ)"]
+    nat --> apis["ECR API e<br/>CloudWatch Logs"]
+    tasks -->|"S3 Gateway Endpoint<br/>(gratuito)"| s3[("Layers das imagens<br/>do ECR no S3")]
 ```
 
-| Ponto | Como está | Por quê |
+Toda a infraestrutura está em um único template CloudFormation: [`infra/stack.yaml`](infra/stack.yaml).
+
+| Decisão | Por quê |
+|---|---|
+| Containers em subnets privadas | Ninguém na internet fala direto com eles, só o load balancer |
+| Um único NAT Gateway | Economia de demo. Em produção, use um por AZ |
+| S3 Gateway Endpoint | As camadas da imagem vêm do S3 sem passar pelo NAT (que cobra por GB) |
+| Fargate ARM64 (Graviton) | Mais barato que x86 e sem servidor para administrar |
+| Deploy via CloudFormation | Toda mudança, inclusive de versão, fica versionada no Git |
+
+## Imagem ingênua vs. imagem bem feita
+
+Mesmo código, dois Dockerfiles:
+
+| | [`Dockerfile.naive`](Dockerfile.naive) | [`Dockerfile`](Dockerfile) |
 |---|---|---|
-| Imagem | Multi-stage, `distroless/static:nonroot`, cross-compile sem QEMU | 16,8 MB no `docker images` (3,7 MB comprimida no ECR) contra 1,44 GB da ingênua; sem shell, sem root |
-| Runtime | `ReadonlyRootFilesystem`, `Drop: ALL`, UID 65532 | Defesa em profundidade |
-| Execution role | Pull só deste repositório, escrita só neste log group | Usada pelo agente ECS |
-| Task role | Vazia, com condição contra confused deputy | Usada pela app, que não chama nenhuma API AWS |
-| Deploy | Rolling 100/200 + circuit breaker com rollback | Zero downtime e rollback automático |
-| Shutdown | App 8s < `StopTimeout` 10s; deregistration 10s | Encerra antes do SIGKILL |
-| Keep-alive | App 65s > idle do ALB 60s | Evita 502 em conexões reaproveitadas |
-| ECR | Tags imutáveis, scan on push, lifecycle de 10 imagens | Toda versão é rastreável |
+| Base | `golang:1.27` (Debian + compilador) | `distroless/static:nonroot` |
+| Tamanho (`docker images`) | **1,44 GB** | **16,8 MB** (3,7 MB comprimida no ECR) |
+| CVEs HIGH/CRITICAL (Trivy) | **194** | **0** |
+| Shell dentro do container | Sim | Não |
+| Roda como root | Sim | Não (UID 65532) |
+| Imagem base | Tag mutável | Fixada por digest |
 
-## Pré-requisitos
+O compilador não vai para produção: ele fica no primeiro estágio do build, e só o binário segue para a imagem final.
+
+## Rodando
+
+### Pré-requisitos
 
 - Docker com buildx
-- AWS CLI v2 com sessão temporária (SSO): `aws sso login --profile <perfil>` e `export AWS_PROFILE=<perfil>`
-- Trivy
-- Go 1.27+ (só para `make test`)
+- [Trivy](https://trivy.dev/) para o scan de vulnerabilidades
+- Go 1.27+ (só para rodar os testes)
+- Para a parte na AWS: AWS CLI v2 com credenciais temporárias (`aws login` ou `aws sso login --profile <perfil>`, depois `export AWS_PROFILE=<perfil>`)
 
-## Véspera do evento
+### Só local, sem AWS
 
 ```bash
-make pin                       # fixa os digests das imagens base no Dockerfile (commit)
-make scan-warmup               # baixa o DB do Trivy (evita travar no palco)
-make bootstrap                 # cria infra com DesiredCount=0 (~4 min; repositório ainda vazio)
-make release VERSION=v1        # build ARM64 → push → service com 2 tasks
-make build VERSION=v2 && make push VERSION=v2   # deixa a v2 pronta no ECR
-make watch                     # validar
+make test                                     # testes da API
+make build-naive && make build && make compare
+make scan-warmup && make scan                 # CVEs das duas imagens
+make build PLATFORM=linux/amd64 && make run-local   # em máquina x86; em Mac M1+ basta make build
+curl localhost:8080/v1/info
 ```
 
-Faça `make build-naive` e `make build` também na véspera para aquecer o cache de layers.
+### Na AWS (região `us-east-1`)
 
-## No palco
+> [!WARNING]
+> Isso cria recursos pagos (cerca de US$ 0,10/h). Rode `make destroy` quando terminar.
 
-| Bloco | Comando | O que mostrar |
+```bash
+make bootstrap                 # cria a infra sem containers (~4 min; o repositório ECR ainda está vazio)
+make release VERSION=v1        # build ARM64 → push para o ECR → sobe 2 tasks (~2,5 min)
+make watch                     # curl em loop no load balancer (Ctrl+C para parar)
+```
+
+O deploy é feito em duas fases porque o ECS não consegue subir um container cuja imagem ainda não existe no ECR.
+
+## Roteiro da demo
+
+| Bloco | Comando | O que observar |
 |---|---|---|
-| Imagem | `make build-naive && make build && make compare` | Diferença de tamanho entre a imagem ingênua e a multi-stage |
-| Segurança | `make scan` | Contagem de CVEs HIGH/CRITICAL das duas imagens |
-| Load balancing | `make watch` (terminal 2) | `task_id` e `az` alternando |
-| Rolling deploy | `make deploy VERSION=v2` | `v1 → v2` sem nenhuma resposta falhar |
-| Self-healing | `make kill-task` | O ECS sobe um task novo (~1 min até 2 targets healthy) e o ALB tira o morto do pool sem nenhuma resposta falhar |
-| Logs | `make logs` | Logs JSON no CloudWatch (mostra só os últimos 10 min: deixe o `make watch` rodando antes) |
+| Imagem | `make build-naive && make build && make compare` | 1,44 GB contra 16,8 MB |
+| Segurança | `make scan` | 194 CVEs HIGH/CRITICAL contra 0 |
+| Load balancing | `make watch` (deixe rodando em outro terminal) | `task_id` e `az` alternando |
+| Rolling deploy | `make build VERSION=v2 && make push VERSION=v2`, depois `make deploy VERSION=v2` | `v1` vira `v2` sem nenhuma resposta falhar (~4 min) |
+| Self-healing | `make kill-task` | Um `task_id` novo aparece em ~1 min, sem nenhuma resposta falhar |
+| Logs | `make logs` | Logs JSON no CloudWatch (mostra os últimos 10 min, então deixe o `watch` rodando) |
 
-`make deploy VERSION=v2` leva cerca de 4 min porque o CloudFormation espera o service estabilizar. Use esse tempo para o slide de task role vs execution role.
+Os números acima foram medidos numa conta de testes. Os detalhes estão em [`docs/resultados-validacao.md`](docs/resultados-validacao.md).
 
-Para rodar localmente em x86: `make build PLATFORM=linux/amd64 && make run-local`.
+<details>
+<summary><b>Checklist de quem vai apresentar</b></summary>
 
-## HTTPS (opcional)
+Na véspera:
+
+```bash
+make pin                       # fixa os digests das imagens base (commite o resultado)
+make scan-warmup               # baixa o banco do Trivy para o scan não travar no palco
+make build-naive && make build # aquece o cache de layers
+make bootstrap && make release VERSION=v1
+make build VERSION=v2 && make push VERSION=v2   # deixa a v2 pronta no ECR
+make watch                     # valida
+```
+
+No palco:
+
+- O `make deploy VERSION=v2` leva ~4 min porque o CloudFormation espera o service estabilizar. Dá tempo de passar o slide de task role vs. execution role.
+- No `make kill-task`, o ECS leva ~25 s para reagir, e o task parado continua respondendo até sair do load balancer. Por isso o `watch` não mostra erro. Narre o `task_id` antigo sumindo e o novo aparecendo.
+- No console do ECR, o resultado do scan aparece na linha sem tag (a imagem arm64), não na linha `v1`.
+
+</details>
+
+## Segurança: o que cada decisão protege
+
+| Camada | Como está | Por quê |
+|---|---|---|
+| Imagem | Distroless, sem shell, usuário não-root | Menos pacotes = menos CVEs; quem invadir não tem shell nem root |
+| Runtime | Filesystem somente leitura e todas as Linux capabilities removidas | O processo não consegue alterar o próprio container |
+| Rede | Security group dos tasks aceita só o security group do ALB | Nada chega aos containers sem passar pelo load balancer |
+| Execution role | Pull só deste repositório, escrita só neste log group | Menor privilégio para a AWS |
+| Task role | Vazia, com condição contra *confused deputy* | Se a app for comprometida, não ganha acesso à conta |
+| ECR | Tags imutáveis, scan on push, mantém as últimas 10 imagens | `v1` é sempre a mesma imagem e toda versão é rastreável |
+| Deploy | Rolling 100/200 com circuit breaker e rollback automático | Uma versão quebrada volta sozinha para a anterior |
+| Shutdown | App encerra em 8 s, antes dos 10 s em que o ECS mata o processo | Requisições em andamento terminam antes do container sair |
+| Keep-alive | App 65 s, mais que o idle de 60 s do ALB | Evita 502 em conexões reaproveitadas |
+
+O template passa no [Checkov](https://www.checkov.io/) com 35 checks aprovados. As 7 exceções estão justificadas no próprio template:
+
+<details>
+<summary>Exceções aceitas do Checkov</summary>
+
+| Check | Motivo |
+|---|---|
+| CKV_AWS_260, CKV_AWS_2, CKV_AWS_103 | ALB público na porta 80; vira redirect para HTTPS com `CERT_ARN` |
+| CKV_AWS_91 | Access logs do ALB criariam um bucket sem uso numa demo curta |
+| CKV_AWS_136, CKV_AWS_158 | KMS CMK no ECR e nos logs adiciona custo sem dado sensível |
+| CKV_AWS_65 | Container Insights é cobrado por métrica; ALB e logs bastam |
+
+</details>
+
+### HTTPS (opcional)
 
 ```bash
 make deploy CERT_ARN=arn:aws:acm:us-east-1:<conta>:certificate/<id>
 ```
 
-A porta 80 passa a redirecionar para a 443 (TLS 1.3/1.2). Crie um CNAME do seu domínio para o DNS do ALB, porque o certificado não cobre `*.elb.amazonaws.com`.
+A porta 80 passa a redirecionar para a 443 (TLS 1.3/1.2). Crie um CNAME do seu domínio apontando para o DNS do ALB, porque o certificado não cobre `*.elb.amazonaws.com`.
 
-## Destruir
+## Custo e limpeza
+
+Cerca de **US$ 0,10/h** em `us-east-1`. O maior item é o NAT Gateway, seguido do ALB, dos 2 tasks Fargate ARM (0.25 vCPU / 0.5 GB) e dos IPv4 públicos. NAT e ALB cobram por hora cheia: na validação, 25 minutos de stack custaram ~US$ 0,08. Confira na [AWS Pricing Calculator](https://calculator.aws/) antes de subir.
 
 ```bash
 make destroy
 ```
 
-O repositório ECR é esvaziado e removido junto com a stack (`EmptyOnDelete`).
+Remove tudo, inclusive o repositório ECR com as imagens dentro (`EmptyOnDelete`).
 
-## Custo estimado (us-east-1)
+## Indo para produção
 
-Cerca de **US$ 0,10/h (~US$ 2,50/dia)**. O NAT Gateway (~US$ 0,045/h, cobrado por hora cheia) é o maior item, seguido do ALB, de 2 tasks Fargate ARM 0.25 vCPU/0.5 GB e dos IPv4 públicos do NAT e do ALB. Confira na [AWS Pricing Calculator](https://calculator.aws/) antes de subir.
+Esta é uma demo. Para produção, reavalie:
 
-## Exceções aceitas do Checkov
+- um NAT Gateway por AZ, ou VPC interface endpoints para ECR e CloudWatch Logs;
+- HTTPS obrigatório e AWS WAF no ALB;
+- KMS nas imagens e nos logs, e access logs do ALB;
+- pipeline de CI/CD com SBOM e assinatura de imagem (cosign);
+- deploy blue/green e Container Insights.
 
-`checkov -f infra/stack.yaml` → 35 aprovados, 7 pulados. Cada exceção está registrada no `Metadata` do recurso com justificativa:
+## Estrutura do repositório
 
-| Check | Motivo |
-|---|---|
-| CKV_AWS_260, CKV_AWS_2, CKV_AWS_103 | ALB público na porta 80; vira redirect para HTTPS com `CERT_ARN` |
-| CKV_AWS_91 | Access logs do ALB criariam um bucket sem uso numa demo de 1 dia |
-| CKV_AWS_136, CKV_AWS_158 | KMS CMK no ECR e nos logs adiciona custo sem dado sensível |
-| CKV_AWS_65 | Container Insights é cobrado por métrica; ALB e logs bastam |
-
-Em produção, reavalie todas: subnets e NAT por AZ, interface endpoints, KMS, access logs, WAF, SBOM e assinatura de imagem com cosign.
+```
+.
+├── main.go                  # servidor HTTP e graceful shutdown
+├── handler.go               # rotas /v1/info e /healthz
+├── metadata.go              # lê task_id e AZ do metadata endpoint do ECS
+├── *_test.go                # testes
+├── Dockerfile               # multi-stage + distroless (o jeito certo)
+├── Dockerfile.naive         # o jeito ingênuo, para comparar
+├── infra/stack.yaml         # toda a infra em CloudFormation
+├── scripts/pin-digests.sh   # fixa as imagens base por digest
+├── Makefile                 # todos os comandos da demo
+└── docs/
+    └── resultados-validacao.md
+```
