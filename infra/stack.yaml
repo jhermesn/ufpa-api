@@ -210,6 +210,7 @@ Resources:
   # ---------- Load balancer ----------
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: InternetGatewayAttachment
     Metadata:
       checkov:
         skip:
