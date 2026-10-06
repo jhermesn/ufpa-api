@@ -1,6 +1,6 @@
 # ufpa-api
 
-**Containers na AWS desmistificados: da imagem ao deploy seguro.** Demo da palestra apresentada no lançamento do Student Builder Group UFPA.
+**Da imagem Docker ao deploy seguro no ECS Fargate**, de ponta a ponta e com cada decisão explicada.
 
 Uma API mínima em Go, empacotada numa imagem de poucos MB, rodando no ECS Fargate (ARM64) atrás de um load balancer. Cada resposta diz **qual container atendeu** e **em qual zona de disponibilidade**, e com isso dá para *ver* a nuvem trabalhando:
 
@@ -19,7 +19,7 @@ GET /healthz  → {"status":"ok"}
 - [Arquitetura](#arquitetura)
 - [Imagem ingênua vs. imagem bem feita](#imagem-ingênua-vs-imagem-bem-feita)
 - [Rodando](#rodando)
-- [Roteiro da demo](#roteiro-da-demo)
+- [Experimentos](#experimentos)
 - [Segurança: o que cada decisão protege](#segurança-o-que-cada-decisão-protege)
 - [Custo e limpeza](#custo-e-limpeza)
 - [Indo para produção](#indo-para-produção)
@@ -101,40 +101,25 @@ make watch                     # curl em loop no load balancer (Ctrl+C para para
 
 O deploy é feito em duas fases porque o ECS não consegue subir um container cuja imagem ainda não existe no ECR.
 
-## Roteiro da demo
+## Experimentos
 
-| Bloco | Comando | O que observar |
+Com a stack no ar, deixe o `make watch` rodando em um terminal e use outro para os comandos:
+
+| Experimento | Comando | O que observar |
 |---|---|---|
-| Imagem | `make build-naive && make build && make compare` | 1,44 GB contra 16,8 MB |
-| Segurança | `make scan` | 194 CVEs HIGH/CRITICAL contra 0 |
-| Load balancing | `make watch` (deixe rodando em outro terminal) | `task_id` e `az` alternando |
+| Tamanho da imagem | `make build-naive && make build && make compare` | 1,44 GB contra 16,8 MB |
+| Vulnerabilidades | `make scan-warmup && make scan` | 194 CVEs HIGH/CRITICAL contra 0 |
+| Load balancing | `make watch` | `task_id` e `az` alternando |
 | Rolling deploy | `make build VERSION=v2 && make push VERSION=v2`, depois `make deploy VERSION=v2` | `v1` vira `v2` sem nenhuma resposta falhar (~4 min) |
 | Self-healing | `make kill-task` | Um `task_id` novo aparece em ~1 min, sem nenhuma resposta falhar |
-| Logs | `make logs` | Logs JSON no CloudWatch (mostra os últimos 10 min, então deixe o `watch` rodando) |
+| Logs | `make logs` | Logs JSON no CloudWatch |
 
-Os números acima foram medidos numa conta de testes. Os detalhes estão em [`docs/resultados-validacao.md`](docs/resultados-validacao.md).
+Os números foram medidos numa conta de testes em `us-east-1`. Alguns detalhes que ajudam a entender o que aparece na tela:
 
-<details>
-<summary><b>Checklist de quem vai apresentar</b></summary>
-
-Na véspera:
-
-```bash
-make pin                       # fixa os digests das imagens base (commite o resultado)
-make scan-warmup               # baixa o banco do Trivy para o scan não travar no palco
-make build-naive && make build # aquece o cache de layers
-make bootstrap && make release VERSION=v1
-make build VERSION=v2 && make push VERSION=v2   # deixa a v2 pronta no ECR
-make watch                     # valida
-```
-
-No palco:
-
-- O `make deploy VERSION=v2` leva ~4 min porque o CloudFormation espera o service estabilizar. Dá tempo de passar o slide de task role vs. execution role.
-- No `make kill-task`, o ECS leva ~25 s para reagir, e o task parado continua respondendo até sair do load balancer. Por isso o `watch` não mostra erro. Narre o `task_id` antigo sumindo e o novo aparecendo.
-- No console do ECR, o resultado do scan aparece na linha sem tag (a imagem arm64), não na linha `v1`.
-
-</details>
+- **Deploy demorado:** o `make deploy` só termina quando o CloudFormation confirma que o service estabilizou.
+- **Self-healing sem erro:** o ECS tira o task parado do load balancer e espera as conexões drenarem antes de encerrá-lo. Por isso o `watch` não mostra falha, só um `task_id` sumindo e outro aparecendo.
+- **`make logs` vazio:** ele mostra só os últimos 10 minutos e os health checks não são logados. Gere tráfego com o `watch` antes.
+- **Scan no console do ECR:** a tag `v1` aponta para um índice multi-arquitetura. O resultado do scan fica na imagem arm64, na linha sem tag.
 
 ## Segurança: o que cada decisão protege
 
@@ -204,7 +189,10 @@ Esta é uma demo. Para produção, reavalie:
 ├── Dockerfile.naive         # o jeito ingênuo, para comparar
 ├── infra/stack.yaml         # toda a infra em CloudFormation
 ├── scripts/pin-digests.sh   # fixa as imagens base por digest
-├── Makefile                 # todos os comandos da demo
-└── docs/
-    └── resultados-validacao.md
+├── Makefile                 # todos os comandos
+└── LICENSE
 ```
+
+## Licença
+
+[MIT](LICENSE)
