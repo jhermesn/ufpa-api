@@ -22,7 +22,7 @@ Internet → ALB (subnets públicas, 2 AZs)
 
 | Ponto | Como está | Por quê |
 |---|---|---|
-| Imagem | Multi-stage, `distroless/static:nonroot`, cross-compile sem QEMU | < 10 MB, sem shell, sem root |
+| Imagem | Multi-stage, `distroless/static:nonroot`, cross-compile sem QEMU | 16,8 MB no `docker images` (3,7 MB comprimida no ECR) contra 1,44 GB da ingênua; sem shell, sem root |
 | Runtime | `ReadonlyRootFilesystem`, `Drop: ALL`, UID 65532 | Defesa em profundidade |
 | Execution role | Pull só deste repositório, escrita só neste log group | Usada pelo agente ECS |
 | Task role | Vazia, com condição contra confused deputy | Usada pela app, que não chama nenhuma API AWS |
@@ -43,7 +43,7 @@ Internet → ALB (subnets públicas, 2 AZs)
 ```bash
 make pin                       # fixa os digests das imagens base no Dockerfile (commit)
 make scan-warmup               # baixa o DB do Trivy (evita travar no palco)
-make bootstrap                 # cria infra com DesiredCount=0 (~5 min; repositório ainda vazio)
+make bootstrap                 # cria infra com DesiredCount=0 (~4 min; repositório ainda vazio)
 make release VERSION=v1        # build ARM64 → push → service com 2 tasks
 make build VERSION=v2 && make push VERSION=v2   # deixa a v2 pronta no ECR
 make watch                     # validar
@@ -59,10 +59,10 @@ Faça `make build-naive` e `make build` também na véspera para aquecer o cache
 | Segurança | `make scan` | Contagem de CVEs HIGH/CRITICAL das duas imagens |
 | Load balancing | `make watch` (terminal 2) | `task_id` e `az` alternando |
 | Rolling deploy | `make deploy VERSION=v2` | `v1 → v2` sem nenhuma resposta falhar |
-| Self-healing | `make kill-task` | O ECS sobe um task novo e o ALB tira o morto do pool |
-| Logs | `make logs` | Logs JSON no CloudWatch |
+| Self-healing | `make kill-task` | O ECS sobe um task novo (~1 min até 2 targets healthy) e o ALB tira o morto do pool sem nenhuma resposta falhar |
+| Logs | `make logs` | Logs JSON no CloudWatch (mostra só os últimos 10 min: deixe o `make watch` rodando antes) |
 
-`make deploy VERSION=v2` leva de 2 a 4 min porque o CloudFormation espera o service estabilizar. Use esse tempo para o slide de task role vs execution role.
+`make deploy VERSION=v2` leva cerca de 4 min porque o CloudFormation espera o service estabilizar. Use esse tempo para o slide de task role vs execution role.
 
 Para rodar localmente em x86: `make build PLATFORM=linux/amd64 && make run-local`.
 
