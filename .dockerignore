@@ -1,6 +1,6 @@
 .git
 infra
-scripts
+.github
 *.md
 Makefile
 Dockerfile*

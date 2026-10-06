@@ -65,7 +65,7 @@ Mesmo código, dois Dockerfiles:
 | CVEs HIGH/CRITICAL (Trivy) | **194** | **0** |
 | Shell dentro do container | Sim | Não |
 | Roda como root | Sim | Não (UID 65532) |
-| Imagem base | Tag mutável | Fixada por digest |
+| Imagem base | Tag mutável | Fixada por digest, atualizada pelo Dependabot |
 
 O compilador não vai para produção: ele fica no primeiro estágio do build, e só o binário segue para a imagem final.
 
@@ -188,7 +188,7 @@ Esta é uma demo. Para produção, reavalie:
 ├── Dockerfile               # multi-stage + distroless (o jeito certo)
 ├── Dockerfile.naive         # o jeito ingênuo, para comparar
 ├── infra/stack.yaml         # toda a infra em CloudFormation
-├── scripts/pin-digests.sh   # fixa as imagens base por digest
+├── .github/dependabot.yml   # atualiza os digests das imagens base
 ├── Makefile                 # todos os comandos
 └── LICENSE
 ```

@@ -14,14 +14,11 @@ ALB_URL  = $(call stack_output,AlbUrl)
 CLUSTER  = $(call stack_output,ClusterName)
 SERVICE  = $(call stack_output,ServiceName)
 
-.PHONY: test pin build-naive build run-local compare scan-warmup scan \
+.PHONY: test build-naive build run-local compare scan-warmup scan \
 	bootstrap deploy login push release watch kill-task logs destroy
 
 test:
 	go test -cover ./...
-
-pin:
-	./scripts/pin-digests.sh Dockerfile
 
 build-naive:
 	docker build -f Dockerfile.naive -t ufpa-api:naive .
