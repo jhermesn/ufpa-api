@@ -27,7 +27,7 @@ Ambiente: macOS (Apple Silicon), OrbStack com Docker 29.4.0 (containerd image st
 | Respostas com falha durante o self-healing | **0 de 78** |
 | `make destroy` | 4 min 8 s |
 | Tempo de vida total da stack no teste | ~25 min |
-| Custo real no Cost Explorer | Indisponível no dia (dados atrasam até 24 h). Ver abaixo como conferir |
+| Custo real no Cost Explorer (~25 min de stack) | **~US$ 0,08** bruto, coberto por créditos (dado parcial do dia) |
 
 ## 1. Premissas verificadas
 
@@ -64,19 +64,31 @@ O `Dockerfile.naive` não foi fixado por digest de propósito: ele é o exemplo 
 - **Self-healing.** Depois do `stop-task`, o scheduler do ECS levou ~26 s para reagir (deregister + novo task). Nesse intervalo o task parado continua respondendo, e por isso o `make watch` não mostra nenhum erro. O que o público vê: o `task_id` antigo some ~28 s depois do comando, só o task sobrevivente responde por ~20 s, e um `task_id` novo aparece ~50 s depois do comando. Vale narrar isso, ou mostrar o `aws ecs describe-services` / console em paralelo.
 - **`make logs`.** O `aws logs tail --follow` mostra só os últimos 10 minutos e os health checks não são logados. Sem tráfego recente a tela fica vazia: deixe o `make watch` rodando antes.
 
-## 4. Custo
+#Leitura do Cost Explorer no mesmo dia, ainda parcial (`Estimated: true`), filtrando `RECORD_TYPE=Usage` para ver o custo bruto antes dos créditos:
 
-O Cost Explorer ainda não tinha dados do dia na hora do teste (`Estimated: true`, sem grupos). Para conferir depois de 24 h:
+| Serviço | US$ | O que é |
+|---|---|---|
+| EC2 - Other | 0,0451 | NAT Gateway: 1 hora cheia, mesmo com ~25 min de uso |
+| Elastic Load Balancing | 0,0225 | ALB: 1 hora |
+| Elastic Container Service | 0,0057 | 2 tasks Fargate ARM 0.25 vCPU/0.5 GB, mais os tasks extras do rollout |
+| Virtual Private Cloud | 0,0055 | IPv4 públicos do NAT e do ALB |
+| ECR + CloudWatch | < 0,0001 | Armazenamento das imagens e logs |
+| **Total da demo** | **~0,08** | Na conta de teste os créditos zeraram o valor líquido |
+
+Ficaram de fora da conta os itens que não são da demo (KMS, Glue) e o próprio Cost Explorer (US$ 0,01 por chamada à API). O slide confirma o que o plano previa: o NAT é o maior item, e hora parcial é cobrada como hora cheia.
+
+Para reler com os dados fechados:
 
 ```bash
 aws ce get-cost-and-usage --region us-east-1 \
   --time-period Start=2026-10-06,End=2026-10-07 --granularity DAILY \
-  --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE
+  --metrics UnblendedCost --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+  --group-by Type=DIMENSION,Key=SERVICE
 ```
 
-Cada chamada à API do Cost Explorer custa US$ 0,01.
+## 5. Fora do escopo
 
-## 5. O que não foi validado
+Por decisão, não serão testados nem usados na palestra:
 
-- HTTPS com `CERT_ARN` (precisa de certificado ACM e domínio).
-- `make run-local` em x86 (validado só em arm64, com `--read-only --cap-drop ALL`).
+- HTTPS com `CERT_ARN`. O suporte continua no template e no README.
+- `make run-local` em x86. A validação foi feita só em arm64, com `--read-only --cap-drop ALL`.
