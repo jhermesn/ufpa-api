@@ -61,7 +61,7 @@ push: login
 release: build push deploy
 
 watch:
-	@while true; do curl -s --max-time 2 $(ALB_URL)/v1/info || echo '{"error":"no response"}'; sleep 0.5; done
+	@while true; do curl -sf --max-time 2 $(ALB_URL)/v1/info || echo '{"error":"no response"}'; sleep 0.5; done
 
 kill-task:
 	aws ecs stop-task --cluster $(CLUSTER) --reason "demo: self-healing" --query 'task.taskArn' --output text \
