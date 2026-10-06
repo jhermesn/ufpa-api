@@ -1,0 +1,7 @@
+.git
+infra
+scripts
+*.md
+Makefile
+Dockerfile*
+*_test.go
