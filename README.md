@@ -36,7 +36,7 @@ Internet → ALB (subnets públicas, 2 AZs)
 - Docker com buildx
 - AWS CLI v2 com sessão temporária (SSO): `aws sso login --profile <perfil>` e `export AWS_PROFILE=<perfil>`
 - Trivy
-- Go 1.25+ (só para `make test`)
+- Go 1.27+ (só para `make test`)
 
 ## Véspera do evento
 
