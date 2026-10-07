@@ -5,3 +5,5 @@ infra
 Makefile
 Dockerfile*
 *_test.go
+.env*
+*.pem
