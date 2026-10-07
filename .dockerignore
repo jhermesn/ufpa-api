@@ -7,3 +7,4 @@ Dockerfile*
 *_test.go
 .env*
 *.pem
+assets

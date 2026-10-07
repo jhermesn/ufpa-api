@@ -35,14 +35,13 @@ GET /healthz  → {"status":"ok"}
 
 ## Arquitetura
 
-```mermaid
-flowchart LR
-    user(["Internet"]) -->|"HTTP :80"| alb["Application Load Balancer<br/>subnets públicas, 2 AZs"]
-    alb -->|":8080, só a partir do ALB"| tasks["ECS Fargate ARM64<br/>2 tasks em subnets privadas<br/>sem IP público"]
-    tasks -->|":443"| nat["NAT Gateway<br/>(1 AZ)"]
-    nat --> apis["ECR API e<br/>CloudWatch Logs"]
-    tasks -->|"S3 Gateway Endpoint<br/>(gratuito)"| s3[("Layers das imagens<br/>do ECR no S3")]
-```
+![Arquitetura: usuários, Internet Gateway, ALB em duas AZs, tasks Fargate em subnets privadas, NAT Gateway para ECR e CloudWatch Logs, e S3 Gateway Endpoint para as camadas da imagem](assets/arquitetura.png)
+
+- **Linha sólida:** o caminho da requisição. Internet Gateway → ALB → tasks na porta 8080; o security group das tasks só aceita o ALB.
+- **Linha tracejada:** a saída das tasks pelo NAT Gateway para baixar a imagem (ECR) e enviar logs (CloudWatch).
+- **Linha verde:** as camadas da imagem vêm do S3 pelo Gateway Endpoint, de graça e sem passar pelo NAT.
+
+O diagrama foi feito no [draw.io](https://www.drawio.com/) com os ícones oficiais da AWS. A fonte editável é [`assets/arquitetura.drawio`](assets/arquitetura.drawio).
 
 Toda a infraestrutura está em um único template CloudFormation: [`infra/stack.yaml`](infra/stack.yaml).
 
@@ -191,6 +190,7 @@ Esta é uma demo. Para produção, reavalie:
 ├── Dockerfile.naive         # o jeito ingênuo, para comparar
 ├── infra/stack.yaml         # toda a infra em CloudFormation
 ├── .github/dependabot.yml   # atualiza os digests das imagens base
+├── assets/                 # diagrama de arquitetura (PNG + fonte .drawio)
 ├── Makefile                 # todos os comandos
 └── LICENSE
 ```
