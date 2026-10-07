@@ -101,6 +101,8 @@ make watch                     # curl em loop no load balancer (Ctrl+C para para
 
 O deploy é feito em duas fases porque o ECS não consegue subir um container cuja imagem ainda não existe no ECR.
 
+As subnets usam os IDs de zona `use1-az1` e `use1-az2`, e não nomes como `us-east-1a`, porque cada conta mapeia os nomes para zonas diferentes e o Fargate ARM64 não roda na `use1-az3`. Para trocar: `--parameter-overrides AvailabilityZoneIds=use1-az4,use1-az6`.
+
 ## Experimentos
 
 Com a stack no ar, deixe o `make watch` rodando em um terminal e use outro para os comandos:

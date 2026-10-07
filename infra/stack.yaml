@@ -15,6 +15,10 @@ Parameters:
     MinValue: 0
     MaxValue: 4
     Description: Use 0 on the first deploy (repository still empty), then 2.
+  AvailabilityZoneIds:
+    Type: CommaDelimitedList
+    Default: use1-az1,use1-az2
+    Description: Two AZ IDs (not names, which differ per account). Fargate ARM64 is not available in use1-az3.
   CertificateArn:
     Type: String
     Default: ""
@@ -48,7 +52,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.20.0.0/24
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZoneId: !Select [0, !Ref AvailabilityZoneIds]
       Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public-a" }]
 
   PublicSubnetB:
@@ -56,7 +60,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.20.1.0/24
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZoneId: !Select [1, !Ref AvailabilityZoneIds]
       Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public-b" }]
 
   PrivateSubnetA:
@@ -64,7 +68,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.20.10.0/24
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZoneId: !Select [0, !Ref AvailabilityZoneIds]
       Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-private-a" }]
 
   PrivateSubnetB:
@@ -72,7 +76,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: 10.20.11.0/24
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZoneId: !Select [1, !Ref AvailabilityZoneIds]
       Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-private-b" }]
 
   PublicRouteTable:
